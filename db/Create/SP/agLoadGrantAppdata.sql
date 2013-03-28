@@ -1,17 +1,19 @@
-/****** Object:  StoredProcedure [dbo].[agLoadGrantAppdata]    Script Date: 03/16/2012 19:14:00 ******/
-IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[agLoadGrantAppdata]') AND type in (N'P', N'PC'))
-DROP PROCEDURE [dbo].[agLoadGrantAppdata]
+/****** Object:  StoredProcedure [UCSF].[agLoadGrantAppdata]    Script Date: 03/16/2012 19:14:00 ******/
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[UCSF].[agLoadGrantAppdata]') AND type in (N'P', N'PC'))
+DROP PROCEDURE [UCSF].[agLoadGrantAppdata]
 GO
 
 
-Create PROCEDURE [dbo].[agLoadGrantAppdata]
+Create PROCEDURE [UCSF].[agLoadGrantAppdata]
 AS
 BEGIN
 	SET NOCOUNT ON;
 	
 	declare @pid int,
 	@personId int,
+	@nodeid int,
 	@currentPersonId int,
+	@currentPersonURI nvarchar(255),
 	@title nvarchar(255),
 	@fullprojectnum nvarchar(255),
 	@FY int,
@@ -20,8 +22,9 @@ BEGIN
 	@currentPID int,
 	@grantCount int,
 	@json nvarchar(4000),
+	@baseURI nvarchar(255),
 	
-	@shindigAppId int,
+	@orngAppId int,
 	@cnt int,
 	
 	@sFY nvarchar(255), 
@@ -31,35 +34,41 @@ BEGIN
 	set @currentPersonId = 0
 	set @grantCount = 0
 	
-	--set @shindigAppId =0
-	select @shindigAppId = appId from shindig_apps where name = 'Awarded Grants'
-	
+	--set @orngAppId =0
+	select @orngAppId = appId from [ORNG.].[Apps] where name = 'Awarded Grants'
+
+	-- set @baseURI	
+	SELECT @baseURI = [Value] from [Framework.].[Parameter] where [parameterID]= 'baseURI';
+
 	-- remove old grant appdata
-	delete from shindig_appdata where appId = @shindigAppId and keyName != 'VISIBLE';
+	delete from [ORNG.].[AppData] where appId = @orngAppId and keyName != 'VISIBLE';
 	
 	declare investigator cursor FAST_FORWARD for 
-	select distinct G.ProjectTitle, G.FullProjectNum, G.FY, G.ApplicationId, PrincipalInvestigatorId, p.PersonId
+	select distinct G.ProjectTitle, G.FullProjectNum, G.FY, G.ApplicationId, PrincipalInvestigatorId, p.PersonId, n.nodeid
 	  FROM agPrincipalInvestigator I
-	  Join Person P on P.InternalUserName = I.EmployeeID
-	  Join agGrantPrincipal GP on GP.PrincipalInvestigatorPK = I.PrincipalInvestigatorPK
-	  Join [agGrant] G on G.GrantPK = GP.GrantPK
-	where IsVerified = 1
+	  Join [Profile.Data].Person P on P.InternalUserName = I.EmployeeID
+	  Join [UCSF].agGrantPrincipal GP on GP.PrincipalInvestigatorPK = I.PrincipalInvestigatorPK
+	  Join [UCSF].[agGrant] G on G.GrantPK = GP.GrantPK
+	  Join [RDF.Stage].internalnodemap N on N.internalid = p.personid 
+
+	where IsVerified = 1 AND  n.class = 'http://xmlns.com/foaf/0.1/Person'
 	order by I.PrincipalInvestigatorId
 	
 	open investigator
-	fetch next from investigator into @title, @fullprojectnum, @FY, @ApplicationID, @pid, @personId
+	fetch next from investigator into @title, @fullprojectnum, @FY, @ApplicationID, @pid, @personId, @nodeid
 	
 	while @@fetch_status = 0 begin
 		if(@currentPID != @pid) begin
 			if  @currentPID != 0 and @grantCount > 0 begin
-				print 'Insert grant, userId=' + cast(@currentPersonId as varchar) + ', appId=' + cast(@shindigAppId as varchar) + ', keyName=nih_n' + ', val='+ cast(@grantCount as varchar)
+				print 'Insert grant, userId=' + cast(@currentPersonId as varchar) + ', appId=' + cast(@orngAppId as varchar) + ', keyName=nih_n' + ', val='+ cast(@grantCount as varchar)
 				
-				insert shindig_appdata (userId, appId, keyName, value, createdDT, updatedDT)
-				values(@currentPersonId, @shindigAppId, 'nih_n', @grantCount, GetDate(), GetDate())
+				insert [ORNG.].[AppData] (userId, appId, keyName, value, createdDT, updatedDT)
+				values(@currentPersonURI, @orngAppId, 'nih_n', @grantCount, GetDate(), GetDate())
 			end
 						
 			set @currentPID = @pid
 			set @currentPersonId = @personId
+			set @currentPersonURI = @baseURI + cast(@nodeid as varchar)
 			set @grantCount = 0
 		end
 		
@@ -72,37 +81,37 @@ BEGIN
 		EXEC xp_sprintf @json OUTPUT, '{"id":"%s", "t":"%s", "fpn":"%s", "fy":"%s", "aid":"%s"}', 
 			@GrantId, @title, @fullprojectnum, @sFY, @sApplicationId
 			
-		select @cnt = count(*) from shindig_appdata where appId = @shindigAppId and userId = @personID and keyName = 'nih_n'
+		select @cnt = count(*) from [ORNG.].[AppData] where appId = @orngAppId and userId = @baseURI + cast(@nodeid as varchar) and keyName = 'nih_n'
 		if(@cnt = 0) begin
-			print 'Insert grant, userId=' + cast(@currentPersonId as varchar) + ', appId=' + cast(@shindigAppId as varchar) + ', keyName='+ 'nih_' + cast(@grantCount as varchar) + ', json='+ @json
+			print 'Insert grant, userId=' + cast(@currentPersonId as varchar) + ', appId=' + cast(@orngAppId as varchar) + ', keyName='+ 'nih_' + cast(@grantCount as varchar) + ', json='+ @json
 			
-			insert shindig_appdata (userId, appId, keyName, value, createdDT, updatedDT)
-			values(@personID, @shindigAppId, 'nih_' + cast(@grantCount as varchar), @json, GetDate(), GetDate())
+			insert [ORNG.].[AppData] (userId, appId, keyName, value, createdDT, updatedDT)
+			values(@baseURI + cast(@nodeid as varchar), @orngAppId, 'nih_' + cast(@grantCount as varchar), @json, GetDate(), GetDate())
 			
 			set @grantCount = @grantCount + 1
 		end
 		
-		fetch next from investigator into @title, @fullprojectnum, @FY, @ApplicationID, @pid, @personId
+		fetch next from investigator into @title, @fullprojectnum, @FY, @ApplicationID, @pid, @personId, @nodeid
 	end
 
 	if  @grantCount > 0 begin
-		print 'Insert grant, userId=' + cast(@currentPersonId as varchar) + ', appId=' + cast(@shindigAppId as varchar) + ', keyName=nih_n' + ', val='+ cast(@grantCount as varchar)
+		print 'Insert grant, userId=' + cast(@currentPersonId as varchar) + ', appId=' + cast(@orngAppId as varchar) + ', keyName=nih_n' + ', val='+ cast(@grantCount as varchar)
 		
-		insert shindig_appdata (userId, appId, keyName, value, createdDT, updatedDT)
-		values(@currentPersonId, @shindigAppId, 'nih_n', @grantCount, GetDate(), GetDate())
+		insert [ORNG.].[AppData] (userId, appId, keyName, value, createdDT, updatedDT)
+		values(@currentPersonURI, @orngAppId, 'nih_n', @grantCount, GetDate(), GetDate())
 	end
 	
 	close investigator
 	deallocate investigator
 	
 	-- now add all new people with grants as VISIBLE
-	insert shindig_appdata (userId, appId, keyName, value, createdDT, updatedDT)
-		select distinct userId,  @shindigAppId, 'VISIBLE', 'Y', GetDate(), GetDate() from 
-		shindig_appdata where appId = @shindigAppId and keyName != 'VISIBLE';
+	insert [ORNG.].[AppData] (userId, appId, keyName, value, createdDT, updatedDT)
+		select distinct userId,  @orngAppId, 'VISIBLE', 'Y', GetDate(), GetDate() from 
+		[ORNG.].[AppData] where appId = @orngAppId and keyName != 'VISIBLE';
 		
-	insert shindig_app_registry (appId, personId, createdDT) 
-		select @shindigAppId, userId, GetDate() from shindig_appdata
-		where appId = @shindigAppId and keyName = 'VISIBLE' and [value] = 'Y' and 
-		userId not in (select personId from shindig_app_registry where appId = @shindigAppId);
+	insert [ORNG.].[AppRegistry] (appId, personId, createdDT) 
+		select @orngAppId, userId, GetDate() from [ORNG.].[AppData]
+		where appId = @orngAppId and keyName = 'VISIBLE' and [value] = 'Y' and 
+		userId not in (select personId from [ORNG.].[AppRegistry] where appId = @orngAppId);
 	
 END
