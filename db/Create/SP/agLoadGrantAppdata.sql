@@ -1,10 +1,16 @@
-/****** Object:  StoredProcedure [UCSF].[agLoadGrantAppdata]    Script Date: 03/16/2012 19:14:00 ******/
-IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[UCSF].[agLoadGrantAppdata]') AND type in (N'P', N'PC'))
-DROP PROCEDURE [UCSF].[agLoadGrantAppdata]
+
+/****** Object:  StoredProcedure [UCSF].[agLoadGrantAppdata]    Script Date: 03/28/2013 11:37:17 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
 GO
 
 
-Create PROCEDURE [UCSF].[agLoadGrantAppdata]
+
+
+
+CREATE PROCEDURE [UCSF].[agLoadGrantAppdata]
 AS
 BEGIN
 	SET NOCOUNT ON;
@@ -30,41 +36,42 @@ BEGIN
 	@sFY nvarchar(255), 
 	@sApplicationId nvarchar(255)
 	
-	set @currentPID = 0
 	set @currentPersonId = 0
 	set @grantCount = 0
 	
 	--set @orngAppId =0
-	select @orngAppId = appId from [ORNG.].[Apps] where name = 'Awarded Grants'
+	select @orngAppId = appId from [ORNG].[Apps] where name = 'Awarded Grants'
 
 	-- set @baseURI	
 	SELECT @baseURI = [Value] from [Framework.].[Parameter] where [parameterID]= 'baseURI';
 
 	-- remove old grant appdata
-	delete from [ORNG.].[AppData] where appId = @orngAppId and keyName != 'VISIBLE';
+	delete from [ORNG].[AppData] where appId = @orngAppId;
 	
 	declare investigator cursor FAST_FORWARD for 
 	select distinct G.ProjectTitle, G.FullProjectNum, G.FY, G.ApplicationId, PrincipalInvestigatorId, p.PersonId, n.nodeid
-	  FROM agPrincipalInvestigator I
+	  FROM [UCSF].agPrincipalInvestigator I
 	  Join [Profile.Data].Person P on P.InternalUserName = I.EmployeeID
 	  Join [UCSF].agGrantPrincipal GP on GP.PrincipalInvestigatorPK = I.PrincipalInvestigatorPK
 	  Join [UCSF].[agGrant] G on G.GrantPK = GP.GrantPK
 	  Join [RDF.Stage].internalnodemap N on N.internalid = p.personid 
 
 	where IsVerified = 1 AND  n.class = 'http://xmlns.com/foaf/0.1/Person'
-	order by I.PrincipalInvestigatorId
+	order by p.personId
 	
 	open investigator
 	fetch next from investigator into @title, @fullprojectnum, @FY, @ApplicationID, @pid, @personId, @nodeid
 	
 	while @@fetch_status = 0 begin
-		if(@currentPID != @pid) begin
-			if  @currentPID != 0 and @grantCount > 0 begin
-				print 'Insert grant, userId=' + cast(@currentPersonId as varchar) + ', appId=' + cast(@orngAppId as varchar) + ', keyName=nih_n' + ', val='+ cast(@grantCount as varchar)
+		if(@currentPersonId != @personId) 
+			begin
+			if  @currentPersonId != 0 and @grantCount > 0 
+				begin
+					print 'Insert grant, userId=' + cast(@currentPersonId as varchar) + ', appId=' + cast(@orngAppId as varchar) + ', keyName=nih_n' + ', val='+ cast(@grantCount as varchar)
 				
-				insert [ORNG.].[AppData] (userId, appId, keyName, value, createdDT, updatedDT)
-				values(@currentPersonURI, @orngAppId, 'nih_n', @grantCount, GetDate(), GetDate())
-			end
+					insert [ORNG].[AppData] (userId, appId, keyName, value, createdDT, updatedDT)
+					values(@currentPersonURI, @orngAppId, 'nih_n', @grantCount, GetDate(), GetDate())
+				end
 						
 			set @currentPID = @pid
 			set @currentPersonId = @personId
@@ -72,7 +79,7 @@ BEGIN
 			set @grantCount = 0
 		end
 		
-		select top 1 @GrantId = cast(GrantPK as nvarchar(255)) from [agGrant] where ApplicationID = @ApplicationId
+		select top 1 @GrantId = cast(GrantPK as nvarchar(255)) from [UCSF].[agGrant] where ApplicationID = @ApplicationId
 		
 		set @sApplicationId = cast(@ApplicationId as nvarchar(255));
 		set @sFY = cast(@FY as nvarchar(255));
@@ -81,12 +88,12 @@ BEGIN
 		EXEC xp_sprintf @json OUTPUT, '{"id":"%s", "t":"%s", "fpn":"%s", "fy":"%s", "aid":"%s"}', 
 			@GrantId, @title, @fullprojectnum, @sFY, @sApplicationId
 			
-		select @cnt = count(*) from [ORNG.].[AppData] where appId = @orngAppId and userId = @baseURI + cast(@nodeid as varchar) and keyName = 'nih_n'
+		select @cnt = count(*) from [ORNG].[AppData] where appId = @orngAppId and userId = @baseURI + cast(@nodeid as varchar) and keyName = 'nih_n'
 		if(@cnt = 0) begin
 			print 'Insert grant, userId=' + cast(@currentPersonId as varchar) + ', appId=' + cast(@orngAppId as varchar) + ', keyName='+ 'nih_' + cast(@grantCount as varchar) + ', json='+ @json
 			
-			insert [ORNG.].[AppData] (userId, appId, keyName, value, createdDT, updatedDT)
-			values(@baseURI + cast(@nodeid as varchar), @orngAppId, 'nih_' + cast(@grantCount as varchar), @json, GetDate(), GetDate())
+			insert [ORNG].[AppData] (userId, appId, keyName, value, createdDT, updatedDT)
+			values(@baseURI + cast(@nodeid as varchar), @orngAppId, 'nih_' + cast(@grantCount as varchar), replace(@json, '""', '"'), GetDate(), GetDate())
 			
 			set @grantCount = @grantCount + 1
 		end
@@ -97,21 +104,22 @@ BEGIN
 	if  @grantCount > 0 begin
 		print 'Insert grant, userId=' + cast(@currentPersonId as varchar) + ', appId=' + cast(@orngAppId as varchar) + ', keyName=nih_n' + ', val='+ cast(@grantCount as varchar)
 		
-		insert [ORNG.].[AppData] (userId, appId, keyName, value, createdDT, updatedDT)
+		insert [ORNG].[AppData] (userId, appId, keyName, value, createdDT, updatedDT)
 		values(@currentPersonURI, @orngAppId, 'nih_n', @grantCount, GetDate(), GetDate())
 	end
 	
 	close investigator
 	deallocate investigator
 	
-	-- now add all new people with grants as VISIBLE
-	insert [ORNG.].[AppData] (userId, appId, keyName, value, createdDT, updatedDT)
-		select distinct userId,  @orngAppId, 'VISIBLE', 'Y', GetDate(), GetDate() from 
-		[ORNG.].[AppData] where appId = @orngAppId and keyName != 'VISIBLE';
-		
-	insert [ORNG.].[AppRegistry] (appId, personId, createdDT) 
-		select @orngAppId, userId, GetDate() from [ORNG.].[AppData]
-		where appId = @orngAppId and keyName = 'VISIBLE' and [value] = 'Y' and 
-		userId not in (select personId from [ORNG.].[AppRegistry] where appId = @orngAppId);
+	-- now add all new people with grants to registry
+	insert [ORNG].[AppRegistry] (appId, personId, createdDT) 
+		select distinct @orngAppId, userId, GetDate() from [ORNG].[AppData]
+		where appId = @orngAppId and 
+		userId not in (select personId from [ORNG].[AppRegistry] where appId = @orngAppId);
 	
 END
+
+
+GO
+
+

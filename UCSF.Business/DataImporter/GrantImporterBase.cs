@@ -104,7 +104,7 @@ namespace UCSF.Business.DataImporter
 
                             ValidateGrant(grant);
                             AddGrantToRecordset(grant);
-                            AddSuccessGrunt(grant);
+                            AddSuccessGrant(grant);
 
                             if (TotalRecords % RecordsPerTransaction == 0)
                             {
@@ -191,7 +191,7 @@ namespace UCSF.Business.DataImporter
 
         #endregion
 
-        protected virtual void AddSuccessGrunt(Grant grant)
+        protected virtual void AddSuccessGrant(Grant grant)
         {
             TotalRecords++;
             successStream.WriteLine(String.Format("{0},{1}", TotalRecords, grant.ApplicationId));
